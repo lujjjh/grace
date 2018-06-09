@@ -33,6 +33,7 @@ type app struct {
 	net             *gracenet.Net
 	listeners       []net.Listener
 	sds             []httpdown.Server
+	beforeStop      func() error
 	preStartProcess func() error
 	errors          chan error
 }
@@ -45,6 +46,7 @@ func newApp(servers []*http.Server) *app {
 		listeners: make([]net.Listener, 0, len(servers)),
 		sds:       make([]httpdown.Server, 0, len(servers)),
 
+		beforeStop:      func() error { return nil },
 		preStartProcess: func() error { return nil },
 		// 2x num servers for possible Close or Stop errors + 1 for possible
 		// StartProcess error.
@@ -109,6 +111,10 @@ func (a *app) signalHandler(wg *sync.WaitGroup) {
 			// this ensures a subsequent INT/TERM will trigger standard go behaviour of
 			// terminating.
 			signal.Stop(ch)
+			err := a.beforeStop()
+			if err != nil {
+				a.errors <- err
+			}
 			a.term(wg)
 			return
 		case syscall.SIGUSR2:
@@ -199,6 +205,13 @@ func Serve(servers ...*http.Server) error {
 func PreStartProcess(hook func() error) option {
 	return func(a *app) {
 		a.preStartProcess = hook
+	}
+}
+
+// BeforeStop configures a callback to trigger before graceful stop.
+func BeforeStop(hook func() error) option {
+	return func(a *app) {
+		a.beforeStop = hook
 	}
 }
 
